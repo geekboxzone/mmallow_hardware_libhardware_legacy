@@ -132,6 +132,8 @@ static char supplicant_name[PROPERTY_VALUE_MAX];
 /* Is either SUPP_PROP_NAME or P2P_PROP_NAME */
 static char supplicant_prop_name[PROPERTY_KEY_MAX];
 
+static char wifi_type[64];
+
 static int insmod(const char *filename, const char *args)
 {
     void *module;
@@ -253,6 +255,42 @@ int is_wifi_driver_loaded() {
 
 int wifi_load_driver()
 {
+    ALOGD("--%s",__func__);
+    if (check_wifi_preload() == 0) {
+        char driver_status[PROPERTY_VALUE_MAX];
+        int count = 100; /* wait at most 20 seconds for completion */
+
+        if (check_wireless_ready()) {
+           return 0;
+        }
+	ALOGD("%s", __func__);
+        if (rk_wifi_load_driver(1) < 0)
+            return -1;
+
+	if (strcmp(FIRMWARE_LOADER,"") == 0) {
+            property_set(DRIVER_PROP_NAME, "ok");
+        } else {
+            property_set("ctl.start", FIRMWARE_LOADER);
+	}
+        sched_yield();
+
+	while (count-- > 0) {
+            if (check_wireless_ready()) {
+                property_set(DRIVER_PROP_NAME, "ok");
+                return 0;
+            }
+            usleep(200000);
+       }
+
+       property_set(DRIVER_PROP_NAME, "timeout");
+       wifi_unload_driver();
+       return -1;
+    } else {
+       property_set(DRIVER_PROP_NAME, "ok");
+       return 0;
+    }
+
+#if 0
 #ifdef WIFI_DRIVER_MODULE_PATH
     char driver_status[PROPERTY_VALUE_MAX];
     int count = 100; /* wait at most 20 seconds for completion */
@@ -298,11 +336,36 @@ int wifi_load_driver()
     property_set(DRIVER_PROP_NAME, "ok");
     return 0;
 #endif
+#endif
 }
 
 int wifi_unload_driver()
 {
+    int ret = 1;
     usleep(200000); /* allow to finish interface down */
+    if (check_wifi_preload() == 0) { //#ifdef WIFI_DRIVER_MODULE_PATH
+        ALOGD("%s", __func__);
+        ret = rk_wifi_load_driver(0);
+    }
+
+    if (ret == 0) {
+        int count = 20;
+        while (count-- > 0) {
+            if (!check_wireless_ready())
+                break;
+            usleep(500000);
+        }
+        usleep(500000);
+        if (count) {
+            return 0;
+        }
+        return -1;
+    }
+
+    property_set(DRIVER_PROP_NAME, "unloaded");
+    return 0;
+
+#if 0
 #ifdef WIFI_DRIVER_MODULE_PATH
     if (rmmod(DRIVER_MODULE_NAME) == 0) {
         int count = 20; /* wait at most 10 seconds for completion */
@@ -327,6 +390,7 @@ int wifi_unload_driver()
 #endif
     property_set(DRIVER_PROP_NAME, "unloaded");
     return 0;
+#endif
 #endif
 }
 
@@ -446,6 +510,9 @@ int wifi_start_supplicant(int p2p_supported)
     const prop_info *pi;
     unsigned serial = 0, i;
 
+    if (wifi_type[0] == 0)
+        check_wifi_chip_type_string(wifi_type);
+
     if (p2p_supported) {
         strcpy(supplicant_name, P2P_SUPPLICANT_NAME);
         strcpy(supplicant_prop_name, P2P_PROP_NAME);
@@ -460,6 +527,7 @@ int wifi_start_supplicant(int p2p_supported)
         strcpy(supplicant_name, SUPPLICANT_NAME);
         strcpy(supplicant_prop_name, SUPP_PROP_NAME);
     }
+    ALOGD("%s: %s", __func__, supplicant_name);
 
     /* Check whether already running */
     if (property_get(supplicant_prop_name, supp_status, NULL)

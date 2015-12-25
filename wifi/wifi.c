@@ -99,6 +99,13 @@ static char primary_iface[PROPERTY_VALUE_MAX];
 #define WIFI_DRIVER_LOADER_DELAY	1000000
 
 static const char IFACE_DIR[]           = "/data/system/wpa_supplicant";
+
+#ifndef WIFI_DRIVER_MODULE_PATH
+#define WIFI_DRIVER_MODULE_PATH		"/system/lib/modules/none"
+#endif
+#ifndef WIFI_DRIVER_MODULE_NAME
+#define WIFI_DRIVER_MODULE_NAME    "wlan"
+#endif
 #ifdef WIFI_DRIVER_MODULE_PATH
 static const char DRIVER_MODULE_NAME[]  = WIFI_DRIVER_MODULE_NAME;
 static const char DRIVER_MODULE_TAG[]   = WIFI_DRIVER_MODULE_NAME " ";
@@ -111,6 +118,10 @@ static const char SUPPLICANT_NAME[]     = "wpa_supplicant";
 static const char SUPP_PROP_NAME[]      = "init.svc.wpa_supplicant";
 static const char P2P_SUPPLICANT_NAME[] = "p2p_supplicant";
 static const char P2P_PROP_NAME[]       = "init.svc.p2p_supplicant";
+static const char RTL_SUPPLICANT_NAME[] = "p2p_supp_rtl";
+static const char RTL_PROP_NAME[]       = "init.svc.p2p_supp_rtl";
+static const char ESP_SUPPLICANT_NAME[] = "p2p_supp_esp";
+static const char ESP_PROP_NAME[]       = "init.svc.p2p_supp_esp";
 static const char SUPP_CONFIG_TEMPLATE[]= "/system/etc/wifi/wpa_supplicant.conf";
 static const char SUPP_CONFIG_FILE[]    = "/data/misc/wifi/wpa_supplicant.conf";
 static const char P2P_CONFIG_FILE[]     = "/data/misc/wifi/p2p_supplicant.conf";
@@ -218,16 +229,17 @@ int wifi_change_driver_state(const char *state)
 
 int is_wifi_driver_loaded() {
     char driver_status[PROPERTY_VALUE_MAX];
-#ifdef WIFI_DRIVER_MODULE_PATH
+//#ifdef WIFI_DRIVER_MODULE_PATH
     FILE *proc;
     char line[sizeof(DRIVER_MODULE_TAG)+10];
-#endif
+//#endif
 
     if (!property_get(DRIVER_PROP_NAME, driver_status, NULL)
             || strcmp(driver_status, "ok") != 0) {
         return 0;  /* driver not loaded */
     }
-#ifdef WIFI_DRIVER_MODULE_PATH
+
+if (check_wifi_preload() == 0) { //#ifdef WIFI_DRIVER_MODULE_PATH
     /*
      * If the property says the driver is loaded, check to
      * make sure that the property setting isn't just left
@@ -248,150 +260,87 @@ int is_wifi_driver_loaded() {
     fclose(proc);
     property_set(DRIVER_PROP_NAME, "unloaded");
     return 0;
-#else
+} else { //#else
     return 1;
-#endif
+} //#endif
 }
 
 int wifi_load_driver()
 {
-    ALOGD("--%s",__func__);
-    if (check_wifi_preload() == 0) {
+    ALOGD("%s", __func__);
+    if (check_wifi_preload() == 0) { //#ifdef WIFI_DRIVER_MODULE_PATH
         char driver_status[PROPERTY_VALUE_MAX];
         int count = 100; /* wait at most 20 seconds for completion */
-
+        
         if (check_wireless_ready()) {
-           return 0;
+            return 0;
         }
-	ALOGD("%s", __func__);
-        if (rk_wifi_load_driver(1) < 0)
+        
+        if (rk_wifi_load_driver(1) < 0) {
             return -1;
-
-	if (strcmp(FIRMWARE_LOADER,"") == 0) {
+        }
+        
+        if (strcmp(FIRMWARE_LOADER,"") == 0) {
+            /* usleep(WIFI_DRIVER_LOADER_DELAY); */
             property_set(DRIVER_PROP_NAME, "ok");
-        } else {
+        }
+        else {
             property_set("ctl.start", FIRMWARE_LOADER);
-	}
+        }
         sched_yield();
-
-	while (count-- > 0) {
+        while (count-- > 0) {
+            /*
+            if (property_get(DRIVER_PROP_NAME, driver_status, NULL)) {
+            if (strcmp(driver_status, "ok") == 0)
+            return 0;
+            else if (strcmp(DRIVER_PROP_NAME, "failed") == 0) {
+            wifi_unload_driver();
+            return -1;
+            }
+            }
+            */
             if (check_wireless_ready()) {
                 property_set(DRIVER_PROP_NAME, "ok");
                 return 0;
             }
             usleep(200000);
-       }
-
-       property_set(DRIVER_PROP_NAME, "timeout");
-       wifi_unload_driver();
-       return -1;
-    } else {
-       property_set(DRIVER_PROP_NAME, "ok");
-       return 0;
-    }
-
-#if 0
-#ifdef WIFI_DRIVER_MODULE_PATH
-    char driver_status[PROPERTY_VALUE_MAX];
-    int count = 100; /* wait at most 20 seconds for completion */
-
-    if (is_wifi_driver_loaded()) {
-        return 0;
-    }
-
-    if (insmod(DRIVER_MODULE_PATH, DRIVER_MODULE_ARG) < 0)
-        return -1;
-
-    if (strcmp(FIRMWARE_LOADER,"") == 0) {
-        /* usleep(WIFI_DRIVER_LOADER_DELAY); */
-        property_set(DRIVER_PROP_NAME, "ok");
-    }
-    else {
-        property_set("ctl.start", FIRMWARE_LOADER);
-    }
-    sched_yield();
-    while (count-- > 0) {
-        if (property_get(DRIVER_PROP_NAME, driver_status, NULL)) {
-            if (strcmp(driver_status, "ok") == 0)
-                return 0;
-            else if (strcmp(driver_status, "failed") == 0) {
-                wifi_unload_driver();
-                return -1;
-            }
         }
-        usleep(200000);
-    }
-    property_set(DRIVER_PROP_NAME, "timeout");
-    wifi_unload_driver();
-    return -1;
-#else
-#ifdef WIFI_DRIVER_STATE_CTRL_PARAM
-    if (is_wifi_driver_loaded()) {
-        return 0;
-    }
-
-    if (wifi_change_driver_state(WIFI_DRIVER_STATE_ON) < 0)
+        property_set(DRIVER_PROP_NAME, "timeout");
+        wifi_unload_driver();
         return -1;
-#endif
-    property_set(DRIVER_PROP_NAME, "ok");
-    return 0;
-#endif
-#endif
+    } else { //#else
+        property_set(DRIVER_PROP_NAME, "ok");
+        return 0;
+    } //#endif
 }
 
 int wifi_unload_driver()
 {
-    int ret = 1;
+	int ret;
     usleep(200000); /* allow to finish interface down */
+    ALOGD("%s", __func__);
     if (check_wifi_preload() == 0) { //#ifdef WIFI_DRIVER_MODULE_PATH
-        ALOGD("%s", __func__);
         ret = rk_wifi_load_driver(0);
-    }
-
-    if (ret == 0) {
-        int count = 20;
-        while (count-- > 0) {
-            if (!check_wireless_ready())
+        
+        if (ret == 0) {
+            int count = 20; /* wait at most 10 seconds for completion */
+            while (count-- > 0) {
+                //if (!is_wifi_driver_loaded())
+                if (!check_wireless_ready())
                 break;
-            usleep(500000);
-        }
-        usleep(500000);
-        if (count) {
-            return 0;
-        }
-        return -1;
-    }
-
-    property_set(DRIVER_PROP_NAME, "unloaded");
-    return 0;
-
-#if 0
-#ifdef WIFI_DRIVER_MODULE_PATH
-    if (rmmod(DRIVER_MODULE_NAME) == 0) {
-        int count = 20; /* wait at most 10 seconds for completion */
-        while (count-- > 0) {
-            if (!is_wifi_driver_loaded())
-                break;
-            usleep(500000);
-        }
-        usleep(500000); /* allow card removal */
-        if (count) {
-            return 0;
-        }
-        return -1;
-    } else
-        return -1;
-#else
-#ifdef WIFI_DRIVER_STATE_CTRL_PARAM
-    if (is_wifi_driver_loaded()) {
-        if (wifi_change_driver_state(WIFI_DRIVER_STATE_OFF) < 0)
+                usleep(500000);
+            }
+            usleep(500000); /* allow card removal */
+            if (count) {
+                return 0;
+            }
             return -1;
-    }
-#endif
-    property_set(DRIVER_PROP_NAME, "unloaded");
-    return 0;
-#endif
-#endif
+        } else
+            return -1;
+    } else { //#else
+        property_set(DRIVER_PROP_NAME, "unloaded");
+        return 0;
+    } //#endif
 }
 
 int ensure_entropy_file_exists()
@@ -514,8 +463,18 @@ int wifi_start_supplicant(int p2p_supported)
         check_wifi_chip_type_string(wifi_type);
 
     if (p2p_supported) {
-        strcpy(supplicant_name, P2P_SUPPLICANT_NAME);
-        strcpy(supplicant_prop_name, P2P_PROP_NAME);
+        /*if (get_kernel_version() == KERNEL_VERSION_3_10)*/ {
+            if (!strncmp(wifi_type, "ESP", 3)) {
+                strcpy(supplicant_name, ESP_SUPPLICANT_NAME);
+                strcpy(supplicant_prop_name, ESP_PROP_NAME);
+            } else if (!strncmp(wifi_type, "RTL", 3)){
+                strcpy(supplicant_name, RTL_SUPPLICANT_NAME);
+                strcpy(supplicant_prop_name, RTL_PROP_NAME);
+            } else {
+                strcpy(supplicant_name, P2P_SUPPLICANT_NAME);
+                strcpy(supplicant_prop_name, P2P_PROP_NAME);
+            }
+        }
 
         /* Ensure p2p config file is created */
         if (ensure_config_file_exists(P2P_CONFIG_FILE) < 0) {
@@ -594,9 +553,21 @@ int wifi_stop_supplicant(int p2p_supported)
     char supp_status[PROPERTY_VALUE_MAX] = {'\0'};
     int count = 50; /* wait at most 5 seconds for completion */
 
+    if (wifi_type[0] == 0)
+    	check_wifi_chip_type_string(wifi_type);
     if (p2p_supported) {
-        strcpy(supplicant_name, P2P_SUPPLICANT_NAME);
-        strcpy(supplicant_prop_name, P2P_PROP_NAME);
+        /*if (get_kernel_version() == KERNEL_VERSION_3_10)*/ {
+            if (!strncmp(wifi_type, "ESP", 3)) {
+                strcpy(supplicant_name, ESP_SUPPLICANT_NAME);
+                strcpy(supplicant_prop_name, ESP_PROP_NAME);
+            } else if (!strncmp(wifi_type, "RTL", 3)){
+                strcpy(supplicant_name, RTL_SUPPLICANT_NAME);
+                strcpy(supplicant_prop_name, RTL_PROP_NAME);
+            } else {
+                strcpy(supplicant_name, P2P_SUPPLICANT_NAME);
+                strcpy(supplicant_prop_name, P2P_PROP_NAME);
+            }
+        }
     } else {
         strcpy(supplicant_name, SUPPLICANT_NAME);
         strcpy(supplicant_prop_name, SUPP_PROP_NAME);
@@ -884,6 +855,12 @@ int wifi_change_fw_path(const char *fwpath)
     int len;
     int fd;
     int ret = 0;
+
+    if (wifi_type[0] == 0)
+        check_wifi_chip_type_string(wifi_type);
+    if (0 != strncmp(wifi_type, "AP", 2)) {
+        return 0;
+    }
 
     if (!fwpath)
         return ret;

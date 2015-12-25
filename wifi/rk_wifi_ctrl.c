@@ -26,7 +26,7 @@
 #include "hardware_legacy/wifi.h"
 #include "libwpa_client/wpa_ctrl.h"
 
-#define LOG_TAG "RkWifiCtrl"
+#define LOG_TAG "WifiHW"
 #include "cutils/log.h"
 #include "cutils/memory.h"
 #include "cutils/misc.h"

@@ -77,7 +77,7 @@ int check_wifi_chip_type_string(char *type)
     }
     memset(buf, 0, 64);
 
-    if( 0 == read(wififd, buf, 10) ){
+    if( 0 == read(wififd, buf, 32) ){
         ALOGD("read %s failed", WIFI_CHIP_TYPE_PATH);
         close(wififd);
         ret = -1;
